@@ -43,7 +43,7 @@ aborts the commit. Fix the strings, stage the catalog, commit again.
 ## Requirements
 
 - Xcode 16 or newer on every developer Mac and CI runner. The `extract` subcommand of
-  `xcstringstool` shipped with Xcode 16. The check has been exercised with Xcode 27.
+  `xcstringstool` shipped with Xcode 16. The test suite passes on Xcode 16.4, 26.6 and 27.1.
 - The project uses String Catalogs. Projects still on `.strings` files have nothing to compare
   against.
 - git, and the `python3` that comes with Xcode's command line tools (3.9 or newer).
