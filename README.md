@@ -161,10 +161,14 @@ apps works, with the caveat below.
 
 ## What it does not catch
 
-- **Custom views with a `LocalizedStringKey` parameter.** The extractor does not know the types of
-  your own views, so a literal passed to one of them is not seen by the source check. The catalog
-  check still catches it after the next Xcode build, because the build writes the key into the
-  catalog before the developer commits.
+- **Your own APIs that take a `LocalizedStringKey` or `LocalizedStringResource`.** A custom view
+  such as `Banner(title: "…")` or a custom initializer such as `Text(localized: "…")` is
+  localized by the compiler exactly like `Text("…")`, so a build does add the key to the catalog.
+  The extractor does not know your types, so the source check does not see these. The catalog
+  check still catches them once the developer has built, because the build writes the key into
+  the catalog before the commit. A commit made without building slips through for these APIs
+  only. If the code base relies on such wrappers, add a build to the CI job and compare the
+  catalog after it, or ask for the wrappers to be added to the script's extraction patterns.
 - **Strings in unstaged edits.** The hook judges what is being committed. An unstaged edit is checked
   when it is staged.
 - **A key that exists in another target's catalog of the same name.** With two
