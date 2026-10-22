@@ -1,0 +1,34 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Add item" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add item" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Añadir elemento" } }
+      }
+    },
+    "Items: %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Items: %lld" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Elementos: %lld" } }
+      }
+    },
+    "Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Ajustes" } }
+      }
+    },
+    "Welcome back" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Welcome back" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Bienvenido de nuevo" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

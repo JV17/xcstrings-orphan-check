@@ -194,10 +194,54 @@ several hooks. This one is a single file that git runs on its own.
 **How do I remove it?** `git config --unset core.hooksPath` in the clone, and delete the two folders
 from the repository.
 
+## Example project
+
+`example/OrphanDemo` is a small SwiftUI iOS app with a String Catalog in English and Spanish. Every
+string it uses is a Manual entry with both translations, and string extraction is on, exactly as in a
+project created from the Xcode template. Use it to watch the hook work before touching a real
+repository:
+
+1. In your clone of this repository run `git config core.hooksPath .githooks` once.
+2. Open `example/OrphanDemo/OrphanDemo.xcodeproj`, add `Text("Orphan test string")` to
+   `ContentView`, and build. Xcode adds the key to `Localizable.xcstrings` on its own.
+3. Run `git add -A` and `git commit -m "demo"`. The commit is refused because the new catalog key is
+   not marked Manual. Commit without building instead and the finding names the line in
+   `ContentView.swift`.
+4. In the catalog editor switch the key to manual management, or delete it and add it again with
+   **+**, give it a Spanish value, stage the catalog and commit again. The commit goes through.
+
+The project also builds from the command line without opening a simulator:
+
+```sh
+xcodebuild -project example/OrphanDemo/OrphanDemo.xcodeproj -target OrphanDemo \
+  -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+```
+
+## Tests
+
+`tests/run_tests.py` exercises the check end to end. Each test creates a throwaway git repository
+with a small catalog and view, applies one scenario, runs the check and asserts the exit status and
+the messages. It needs only git and Xcode.
+
+```sh
+python3 tests/run_tests.py          # all scenarios, about fifteen seconds
+python3 tests/run_tests.py hook     # only the tests whose name contains "hook"
+```
+
+The scenarios cover new strings in Swift and Objective-C, existing keys on changed lines,
+interpolation placeholders, keys written by a build, Manual and Don't-translate keys, both policies,
+other tables and new catalogs, unstaged and deleted files, the explicit file list, several catalogs
+with the same name, the CI mode on a branch, the hook refusing a commit and `--no-verify`, the
+custom-API gap, the example project's own strings, and the exit status 2 cases. A GitHub Actions
+workflow runs the suite on macOS runners.
+
 ## Repository layout
 
 ```
 .githooks/pre-commit              the hook: three lines that call the script
 scripts/check-orphan-strings.py   the check, one file, standard library only
+tests/run_tests.py                end-to-end tests, standard library only
+example/OrphanDemo/               SwiftUI demo app with an English and Spanish catalog
+.github/workflows/tests.yml       runs the tests on macOS runners
 README.md
 ```
