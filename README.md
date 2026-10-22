@@ -25,8 +25,8 @@ Two checks run on every commit. Both look only at what the commit changes.
 
 **1. Source check.** For every staged `.swift`, `.m` and `.mm` file, the script asks
 `xcrun xcstringstool extract` for the localizable strings in that file and the line each one is on.
-That tool is a lightweight parser, so nothing is compiled and it takes a fraction of a second per
-file. It understands the same APIs the compiler extracts from: `Text`, `Button`, `Label`, `Toggle`,
+That tool is a lightweight parser, so nothing is compiled, and one call covers every staged file.
+It understands the same APIs the compiler extracts from: `Text`, `Button`, `Label`, `Toggle`,
 `TextField`, `Picker`, `Section`, `.navigationTitle`, `.alert`, `.confirmationDialog`, `.searchable`,
 `String(localized:)`, `LocalizedStringResource`, `AttributedString(localized:)`, `NSLocalizedString`
 and friends, in Swift and Objective-C. Strings on lines the commit added or changed must already
@@ -39,6 +39,10 @@ while a key added by hand in the catalog editor carries `"extractionState" : "ma
 
 If either check finds something, the script prints the findings and exits with status 1, and git
 aborts the commit. Fix the strings, stage the catalog, commit again.
+
+Both checks read the content being committed, not the files on disk, so a partly staged file is
+judged exactly as it will be committed. A moved or renamed file counts only for the lines that
+changed in it.
 
 ## Requirements
 
@@ -179,8 +183,9 @@ apps works, with the caveat below.
 
 ## Questions
 
-**Does it slow down commits?** A commit with a handful of changed Swift files takes well under a
-second longer. Nothing is compiled.
+**Does it slow down commits?** Barely. On a test app with 300 Swift files and a 4.4 MB catalog, a
+commit with 30 changed Swift files took about half a second longer. Every tool is started once per
+commit, not once per file, and nothing is compiled.
 
 **Does it change my files?** No. It reads the staged content and the catalogs and prints findings.
 
@@ -224,15 +229,17 @@ with a small catalog and view, applies one scenario, runs the check and asserts 
 the messages. It needs only git and Xcode.
 
 ```sh
-python3 tests/run_tests.py          # all scenarios, about fifteen seconds
+python3 tests/run_tests.py          # all scenarios, run in parallel, a few seconds
 python3 tests/run_tests.py hook     # only the tests whose name contains "hook"
 ```
 
 The scenarios cover new strings in Swift and Objective-C, existing keys on changed lines,
-interpolation placeholders, keys written by a build, Manual and Don't-translate keys, both policies,
-other tables and new catalogs, unstaged and deleted files, the explicit file list, several catalogs
-with the same name, the CI mode on a branch, the hook refusing a commit and `--no-verify`, the
-custom-API gap, the example project's own strings, and the exit status 2 cases. A GitHub Actions
+interpolation placeholders and percent signs, keys written by a build, Manual and Don't-translate
+keys, both policies, other tables and new catalogs, unstaged, partly staged and deleted files, moved
+files, file names with accents or spaces, same-named files in different folders, edits inside
+multi-line literals, the explicit file list, several catalogs with the same name, the CI mode on a
+branch, the hook refusing a commit and `--no-verify`, the custom-API gap, the example project's own
+strings, and the exit status 2 cases. A GitHub Actions
 workflow runs the suite on macOS runners.
 
 ## Repository layout

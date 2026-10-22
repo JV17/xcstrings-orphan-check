@@ -3,18 +3,22 @@
 
 Each test builds a throwaway git repository with a small String Catalog and a SwiftUI view,
 applies one scenario, runs the check and asserts the exit status and the messages.
-Needs git and an Xcode with `xcstringstool extract` (Xcode 16 or newer). Standard library only.
+Tests run side by side. Needs git and an Xcode with `xcstringstool extract` (Xcode 16 or newer).
+Standard library only.
 
     python3 tests/run_tests.py            # run everything
     python3 tests/run_tests.py hook       # run the tests whose name contains "hook"
 """
+import concurrent.futures
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -374,6 +378,7 @@ def invalid_catalog_json_exits_2(repo):
     code, output = repo.check()
     expect(code == 2 and "not valid JSON" in output, f"expected exit 2 with a JSON message, got {code}:\n{output}")
 
+
 @test
 def example_project_strings_are_all_in_its_catalog(repo):
     example = ROOT / "example" / "OrphanDemo" / "OrphanDemo"
@@ -390,6 +395,146 @@ def example_project_strings_are_all_in_its_catalog(repo):
         expect(normalize(key) in manual_keys, f"{key!r} must be a Manual entry in the example catalog")
 
 
+DEBT_VIEW = r"""import SwiftUI
+
+struct Debt: View {
+    let items = ["one", "two", "three"]
+    var body: some View {
+        VStack {
+            Text("Debt not in catalog")
+            ForEach(items, id: \.self) { item in
+                Text(verbatim: item)
+            }
+        }
+    }
+}
+"""
+
+ORPHAN_FILE = 'import SwiftUI\nstruct C: View { var body: some View { Text("Brand new orphan") } }\n'
+
+
+def commit_debt(repo, relative):
+    """Commit a file whose string was never added to the catalog: existing debt."""
+    repo.write(relative, DEBT_VIEW)
+    repo.commit("existing debt")
+
+
+@test
+def moving_a_file_adds_no_new_strings(repo):
+    commit_debt(repo, "App/Old/Debt.swift")
+    (repo.path / "App" / "New").mkdir()
+    repo.git("mv", "App/Old/Debt.swift", "App/New/Debt.swift")
+    expect_clean(repo.check())
+
+
+@test
+def moving_and_editing_a_file_checks_only_the_edited_lines(repo):
+    commit_debt(repo, "App/Old/Debt.swift")
+    (repo.path / "App" / "New").mkdir()
+    repo.git("mv", "App/Old/Debt.swift", "App/New/Debt.swift")
+    repo.append("App/New/Debt.swift", 'struct Moved: View { var body: some View { Text("Brand new orphan") } }\n')
+    repo.stage()
+    output = expect_blocked(repo.check(), "App/New/Debt.swift:14:", '"Brand new orphan"')
+    expect("Debt not in catalog" not in output, f"the moved file's existing strings are not new:\n{output}")
+
+
+@test
+def file_with_an_accented_name_is_checked(repo):
+    repo.write("App/Configuración.swift", ORPHAN_FILE)
+    repo.stage()
+    expect_blocked(repo.check(), "App/Configuración.swift:2:", '"Brand new orphan"')
+
+
+@test
+def file_in_a_folder_with_a_space_is_checked(repo):
+    repo.write("App/My Views/Spaced.swift", ORPHAN_FILE)
+    repo.stage()
+    expect_blocked(repo.check(), "App/My Views/Spaced.swift:2:", '"Brand new orphan"')
+
+
+@test
+def same_file_name_in_two_folders_is_checked_in_both(repo):
+    repo.write("App/Home/Row.swift", 'import SwiftUI\nstruct HomeRow: View { var body: some View { Text("Home orphan") } }\n')
+    repo.write("App/Settings/Row.swift", 'import SwiftUI\nstruct SettingsRow: View { var body: some View { Text("Settings orphan") } }\n')
+    repo.stage()
+    expect_blocked(repo.check(), 'App/Home/Row.swift:2:', '"Home orphan"', 'App/Settings/Row.swift:2:', '"Settings orphan"')
+
+
+@test
+def staged_orphan_is_caught_when_an_unstaged_edit_shifts_lines(repo):
+    repo.append(VIEW, ORPHAN_VIEW)
+    repo.stage()
+    repo.write(VIEW, "// an unstaged comment\n" + (repo.path / VIEW).read_text())
+    expect_blocked(repo.check(), f"App/ContentView.swift:{ORPHAN_LINE}:", '"Brand new orphan"')
+
+
+@test
+def unstaged_orphan_is_not_blamed_on_a_staged_line(repo):
+    staged = 'struct Reuse: View { var body: some View { Text("Legacy orphan") } }\n'
+    repo.append(VIEW, staged)
+    repo.stage()
+    repo.write(VIEW, BASE_VIEW + 'struct Unstaged: View { var body: some View { Text("Unstaged orphan") } }\n' + staged)
+    expect_clean(repo.check())
+
+
+MULTILINE_VIEW = '''import SwiftUI
+
+struct Notice: View {
+    var body: some View {
+        Text("""
+            Terms changed today
+            """)
+    }
+}
+'''
+
+
+@test
+def change_inside_a_multiline_literal_is_caught(repo):
+    repo.write("App/Notice.swift", MULTILINE_VIEW)
+    repo.add_key("Terms changed today", manual("Terms changed today", "Los términos cambiaron hoy"))
+    repo.commit("multi-line literal")
+    repo.write("App/Notice.swift", MULTILINE_VIEW.replace("Terms changed today", "Terms changed this week"))
+    repo.stage()
+    expect_blocked(repo.check(), '"Terms changed this week" is not in Localizable.xcstrings')
+
+
+@test
+def literal_percent_signs_match_the_keys_xcode_writes(repo):
+    repo.append(VIEW, r"""struct Progress: View {
+    let n = 2
+    var body: some View {
+        Text("Save 50% now")
+        Text("\(n)% done")
+    }
+}
+""")
+    repo.add_key("Save 50% now", manual("Save 50% now", "Ahorra 50% ya"))   # keys as the compiler writes them
+    repo.add_key("%lld%% done", manual("%lld%% done", "%lld%% hecho"))
+    repo.stage()
+    expect_clean(repo.check())
+
+
+@test
+def catalog_that_is_not_a_string_catalog_exits_2(repo):
+    repo.write(CATALOG, "[]\n")
+    repo.stage()
+    code, output = repo.check()
+    expect(code == 2 and "is not a String Catalog" in output, f"expected exit 2, got {code}:\n{output}")
+
+
+def run_case(case):
+    """Run one test in its own throwaway repository. Returns None, or the failure report."""
+    with tempfile.TemporaryDirectory() as directory:
+        try:
+            case(Repo(directory))
+            return None
+        except AssertionError as error:
+            return f"FAIL  {case.__name__}\n      {str(error).replace(chr(10), chr(10) + '      ')}"
+        except Exception as error:   # noqa: BLE001 - report and keep going
+            return f"ERROR {case.__name__}: {error!r}"
+
+
 def main():
     probe = subprocess.run(["xcrun", "xcstringstool", "extract", "--help"], capture_output=True, text=True)
     if probe.returncode != 0:
@@ -398,19 +543,19 @@ def main():
     xcode = subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True).stdout.splitlines()
     print(f"Testing {SCRIPT.relative_to(ROOT)} with {xcode[0] if xcode else 'unknown Xcode'}\n")
     selected = [t for t in TESTS if not sys.argv[1:] or any(word in t.__name__ for word in sys.argv[1:])]
+    start = time.perf_counter()
+    # Each test has its own repository, so the tests can run side by side.
+    workers = max(1, min(len(selected), os.cpu_count() or 4))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        outcomes = list(pool.map(run_case, selected))
     failures = 0
-    for case in selected:
-        with tempfile.TemporaryDirectory() as directory:
-            try:
-                case(Repo(directory))
-                print(f"PASS  {case.__name__}")
-            except AssertionError as error:
-                failures += 1
-                print(f"FAIL  {case.__name__}\n      {str(error).replace(chr(10), chr(10) + '      ')}")
-            except Exception as error:   # noqa: BLE001 - report and keep going
-                failures += 1
-                print(f"ERROR {case.__name__}: {error!r}")
-    print(f"\n{len(selected) - failures} passed, {failures} failed")
+    for case, outcome in zip(selected, outcomes):
+        if outcome is None:
+            print(f"PASS  {case.__name__}")
+        else:
+            failures += 1
+            print(outcome)
+    print(f"\n{len(selected) - failures} passed, {failures} failed in {time.perf_counter() - start:.1f} s")
     return 1 if failures else 0
 
 
